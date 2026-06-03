@@ -457,6 +457,297 @@ body{display:flex}
 <input type="file" id="fileInput" style="display:none" accept=".json,.csv,.vcf,.txt" onchange="importFile(event)"/>
 <input type="file" id="impFi"    style="display:none" accept=".json,.csv,.vcf,.txt" onchange="handleImpFile(event)"/>
 <script>
+
+// ══════════════════════════════════════════════════════
+//  SUPABASE SYNC LAYER
+//  Reemplaza las credenciales con las tuyas de Supabase
+// ══════════════════════════════════════════════════════
+const SB_URL  = 'https://zpauephyavafumyalted.supabase.co';
+const SB_KEY  = 'sb_publishable_rrGmDre0_DRVPTaQoRQmWA_UwAr2QmG';
+const SB_READY = SB_URL !== 'https://zpauephyavafumyalted.supabase.co';
+
+let sbOnline = false;
+
+// ── Supabase REST helper ──
+async function sbFetch(method, table, body, params='') {
+  const url = `${SB_URL}/rest/v1/${table}${params}`;
+  const opts = {
+    method,
+    headers: {
+      'apikey':        SB_KEY,
+      'Authorization': `Bearer ${SB_KEY}`,
+      'Content-Type':  'application/json',
+      'Prefer':        method === 'POST' ? 'resolution=merge-duplicates,return=minimal' : 'return=minimal'
+    }
+  };
+  if(body) opts.body = JSON.stringify(body);
+  const res = await fetch(url, opts);
+  if(!res.ok) {
+    const err = await res.text();
+    throw new Error(`${method} ${table}: ${res.status} ${err}`);
+  }
+  if(method === 'GET') return res.json();
+  return true;
+}
+
+// ── Convert local objects to DB rows ──
+function visitaToRow(v) {
+  return { id:v.id, cliente:v.cliente||'', contacto:v.contacto||'', telefono:v.telefono||'',
+    fecha:v.fecha||'', hora:v.hora||'', tipo:v.tipo||'', estado:v.estado||'', notas:v.notas||'' };
+}
+function clienteToRow(c) {
+  return { id:c.id, empresa:c.empresa||'', nif:c.nif||'', contacto:c.contacto||'',
+    cargo:c.cargo||'', telefono:c.telefono||'', email:c.email||'', sector:c.sector||'',
+    ciudad:c.ciudad||'', estado:c.estado||'nunca', origen:c.origen||'',
+    cups:c.cups||'', direccion:c.direccion||'', compania:c.compania||'',
+    energia:c.energia||'', tarifa:c.tarifa||'',
+    kw:c.kw||0, kwh:c.kwh||0, importe:c.importe||0, notas:c.notas||'' };
+}
+function oppToRow(o) {
+  return { id:o.id, cliente:o.cliente||'', contacto:o.contacto||'',
+    valor:o.valor||0, prob:o.prob||50, etapa:o.etapa||'', tipo:o.tipo||'',
+    fecha:o.fecha||'', notas:o.notas||'' };
+}
+function alertaToRow(a) {
+  return { id:a.id, msg:a.msg||'', tipo:a.tipo||'', fecha:a.fecha||'',
+    hora:a.hora||'', cliente:a.cliente||'', activa:a.activa!==false };
+}
+
+// ── SAVE to Supabase + localStorage ──
+async function saveToSupabase() {
+  if(!SB_READY || !sbOnline) return;
+  try {
+    // Upsert all data (insert or update by id)
+    const ops = [
+      VISITS.length     ? sbFetch('POST','visitas',     VISITS.map(visitaToRow),   '?on_conflict=id') : null,
+      CLIENTES.length   ? sbFetch('POST','clientes',    CLIENTES.map(clienteToRow),'?on_conflict=id') : null,
+      OPPS.length       ? sbFetch('POST','oportunidades',OPPS.map(oppToRow),       '?on_conflict=id') : null,
+      ALERTAS.length    ? sbFetch('POST','alertas',     ALERTAS.map(alertaToRow),  '?on_conflict=id') : null,
+    ];
+    // Save partes diarios
+    const parteRows = Object.entries(PARTES).map(([fecha,p])=>({
+      fecha, obj:p.obj||'', log:p.log||'', dif:p.dif||'',
+      prox:p.prox||'', mood:p.mood||'', tareas:p.tareas||[]
+    }));
+    if(parteRows.length) ops.push(sbFetch('POST','partes',parteRows,'?on_conflict=fecha'));
+    // Save etapas config
+    ops.push(sbFetch('POST','ajustes',[{clave:'etapas',valor:{ETAPAS,ECOLOR,EBG}}],'?on_conflict=clave'));
+    await Promise.all(ops.filter(Boolean));
+    setSyncStatus('synced');
+  } catch(e) {
+    console.warn('Supabase save error:', e);
+    setSyncStatus('error');
+  }
+}
+
+// ── LOAD from Supabase ──
+async function loadFromSupabase() {
+  if(!SB_READY) return false;
+  try {
+    const [visits, clientes, opps, alertas, partes, ajustes] = await Promise.all([
+      sbFetch('GET','visitas',     null,'?select=*&order=fecha.asc,hora.asc'),
+      sbFetch('GET','clientes',    null,'?select=*&order=empresa.asc'),
+      sbFetch('GET','oportunidades',null,'?select=*'),
+      sbFetch('GET','alertas',     null,'?select=*'),
+      sbFetch('GET','partes',      null,'?select=*'),
+      sbFetch('GET','ajustes',     null,'?select=*'),
+    ]);
+    VISITS   = visits   || [];
+    CLIENTES = clientes || [];
+    OPPS     = opps     || [];
+    ALERTAS  = alertas  || [];
+    PARTES   = {};
+    (partes||[]).forEach(p => {
+      PARTES[p.fecha] = {obj:p.obj||'',log:p.log||'',dif:p.dif||'',prox:p.prox||'',mood:p.mood||'',tareas:p.tareas||[]};
+    });
+    const cfg = (ajustes||[]).find(a=>a.clave==='etapas');
+    if(cfg?.valor) {
+      if(cfg.valor.ETAPAS) ETAPAS = cfg.valor.ETAPAS;
+      if(cfg.valor.ECOLOR) ECOLOR = cfg.valor.ECOLOR;
+      if(cfg.valor.EBG)    EBG    = cfg.valor.EBG;
+    }
+    // Recalculate counters
+    nextV = VISITS.length   + 1;
+    nextO = OPPS.length     + 1;
+    nextA = ALERTAS.length  + 1;
+    nextC = CLIENTES.length + 1;
+    // Mirror to localStorage
+    saveLocal();
+    sbOnline = true;
+    setSyncStatus('synced');
+    return true;
+  } catch(e) {
+    console.warn('Supabase load error:', e);
+    sbOnline = false;
+    setSyncStatus('offline');
+    return false;
+  }
+}
+
+// ── DELETE helpers ──
+async function sbDelete(table, id) {
+  if(!SB_READY || !sbOnline) return;
+  try { await sbFetch('DELETE', table, null, `?id=eq.${id}`); }
+  catch(e) { console.warn('Delete error:', e); }
+}
+
+// ── SYNC STATUS indicator ──
+function setSyncStatus(status) {
+  const dot = document.querySelector('.sync-dot');
+  const lbl = document.getElementById('saveLabel');
+  const colors = { synced:'#16a34a', offline:'#d97706', error:'#dc2626', saving:'#1a9bdc' };
+  const labels = {
+    synced:  'Sincronizado ✓',
+    offline: 'Offline (local)',
+    error:   'Error sync',
+    saving:  'Guardando...'
+  };
+  if(dot) dot.style.background = colors[status] || '#16a34a';
+  if(lbl) lbl.textContent = labels[status] || status;
+}
+
+// ── LOCAL STORAGE fallback ──
+// function saveLocal() defined in Supabase layer
+// function loadLocal() defined in Supabase layer
+
+// ── OVERRIDE save() and load() ──
+async function save() {
+  saveLocal();
+  lastSaved = new Date().toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
+  updateBadges();
+  if(SB_READY) {
+    setSyncStatus('saving');
+    await saveToSupabase();
+  } else {
+    const el = document.getElementById('saveLabel');
+    if(el) el.textContent = 'Guardado ' + lastSaved;
+  }
+}
+async function load() {
+  setSyncStatus('offline');
+  // 1. Load local immediately (fast)
+  const hasLocal = loadLocal();
+  if(!hasLocal) loadDefaults();
+  updateBadges();
+  render();
+  // 2. Then try Supabase (async, updates UI when ready)
+  if(SB_READY) {
+    setSyncStatus('saving');
+    const ok = await loadFromSupabase();
+    if(ok) {
+      updateBadges();
+      render();
+      toast('🔄 Datos sincronizados con la nube');
+    } else {
+      if(!hasLocal) loadDefaults();
+      setSyncStatus('offline');
+      toast('📴 Modo offline — datos locales');
+    }
+  } else {
+    // No Supabase configured
+    if(!hasLocal) loadDefaults();
+    setSyncStatus('offline');
+  }
+}
+
+// ── REALTIME: ping cada 30s para detectar cambios de otros dispositivos ──
+let lastSyncHash = '';
+async function checkRemoteChanges() {
+  if(!SB_READY || !sbOnline) return;
+  try {
+    const res = await sbFetch('GET','visitas',null,'?select=id,updated_at&order=updated_at.desc&limit=1');
+    const hash = JSON.stringify(res);
+    if(hash !== lastSyncHash && lastSyncHash !== '') {
+      lastSyncHash = hash;
+      const ok = await loadFromSupabase();
+      if(ok) { updateBadges(); render(); toast('🔄 Datos actualizados desde otro dispositivo'); }
+    } else {
+      lastSyncHash = hash;
+    }
+  } catch(e) {}
+}
+setInterval(checkRemoteChanges, 30000); // cada 30 segundos
+
+// ── SUPABASE CONFIG MODAL ──
+function openSupabaseConfig() {
+  document.getElementById('sbConfigOv')?.remove();
+  const currentUrl = SB_URL !== 'https://zpauephyavafumyalted.supabase.co' ? SB_URL : '';
+  const currentKey = SB_KEY !== 'sb_publishable_rrGmDre0_DRVPTaQoRQmWA_UwAr2QmG' ? SB_KEY : '';
+  const configured = SB_READY;
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="overlay" id="sbConfigOv" onclick="if(event.target.id==='sbConfigOv')this.remove()">
+      <div class="modal" style="max-width:520px">
+        <div class="modal-handle"></div>
+        <div class="modal-head">
+          <h3>☁️ Configurar Supabase</h3>
+          <div class="modal-close" onclick="document.getElementById('sbConfigOv').remove()">✕</div>
+        </div>
+        <div class="modal-body">
+          ${configured
+            ? `<div style="background:var(--green-bg);border:1px solid #86efac;border-radius:var(--radius-sm);padding:10px 13px;font-size:13px;color:var(--green);margin-bottom:12px">✅ Supabase configurado y activo · Estado: ${sbOnline?'Online 🟢':'Offline 🟠'}</div>`
+            : `<div style="background:var(--amber-bg);border:1px solid var(--amber);border-radius:var(--radius-sm);padding:10px 13px;font-size:13px;color:var(--amber);margin-bottom:12px">⚠️ Supabase no configurado — los datos solo se guardan localmente</div>`
+          }
+          <div style="background:var(--bg3);border-radius:var(--radius-sm);padding:12px 14px;font-size:12.5px;color:var(--text2);margin-bottom:14px;line-height:1.7">
+            <b style="color:var(--text)">Cómo obtener las credenciales:</b><br/>
+            1. Ve a <b>supabase.com</b> → tu proyecto<br/>
+            2. Settings → API<br/>
+            3. Copia <b>Project URL</b> y <b>anon / public key</b>
+          </div>
+          <div class="field">
+            <label>Project URL</label>
+            <input id="sb_url" value="${currentUrl}" placeholder="https://xxxxxxxxxxxx.supabase.co"/>
+          </div>
+          <div class="field">
+            <label>Anon / Public Key</label>
+            <input id="sb_key" value="${currentKey}" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."/>
+          </div>
+          <div style="background:var(--bg3);border-radius:var(--radius-sm);padding:10px 13px;font-size:12px;color:var(--text3);margin-top:4px;line-height:1.6">
+            💡 Las credenciales se guardan en este dispositivo. Para activarlas en todos los dispositivos, edita el archivo <b>index.html</b> en GitHub y cambia los valores de <b>https://zpauephyavafumyalted.supabase.co</b> y <b>sb_publishable_rrGmDre0_DRVPTaQoRQmWA_UwAr2QmG</b>.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-sm" onclick="document.getElementById('sbConfigOv').remove()">Cancelar</button>
+          <button class="btn btn-accent btn-sm" onclick="testAndSaveSupabase()">Probar y guardar</button>
+        </div>
+      </div>
+    </div>`);
+}
+
+async function testAndSaveSupabase() {
+  const url = document.getElementById('sb_url')?.value.trim();
+  const key = document.getElementById('sb_key')?.value.trim();
+  if(!url || !key) { toast('⚠️ Rellena ambos campos'); return; }
+  toast('⏳ Probando conexión...');
+  try {
+    const res = await fetch(`${url}/rest/v1/clientes?select=id&limit=1`, {
+      headers:{ 'apikey': key, 'Authorization': `Bearer ${key}` }
+    });
+    if(res.ok || res.status === 406) {
+      // Save to localStorage for this session
+      localStorage.setItem('axar_sb_url', url);
+      localStorage.setItem('axar_sb_key', key);
+      document.getElementById('sbConfigOv')?.remove();
+      toast('✅ Conexión OK — recarga la página para activar');
+      setTimeout(()=>location.reload(), 1500);
+    } else {
+      toast(`❌ Error ${res.status} — revisa las credenciales`);
+    }
+  } catch(e) {
+    toast('❌ No se pudo conectar — revisa la URL');
+  }
+}
+
+// Load saved credentials from localStorage if available
+(function loadSavedCredentials() {
+  const savedUrl = localStorage.getItem('axar_sb_url');
+  const savedKey = localStorage.getItem('axar_sb_key');
+  if(savedUrl && savedKey && !SB_READY) {
+    // Dynamic override — these will take effect on next load
+    window.__SB_URL = savedUrl;
+    window.__SB_KEY = savedKey;
+  }
+})();
+
 const TODAY=new Date().toISOString().split('T')[0];
 const fmtDate=iso=>{if(!iso)return'';const[y,m,d]=iso.split('-');return`${d}/${m}/${y}`;};
 const fmtCur=v=>`€${Number(v||0).toLocaleString('es-ES')}`;
@@ -481,26 +772,8 @@ let cSearch='',cFil='todos',impTab='drop',impData=null,impCols=[],impColMap={};
 let parteDate=TODAY;
 
 // ── STORAGE ──
-function save(){
-  localStorage.setItem('axar_crm_v1',JSON.stringify({VISITS,OPPS,ALERTAS,CLIENTES,PARTES,ETAPAS,ECOLOR,EBG,nextV,nextO,nextA,nextC}));
-  lastSaved=new Date().toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
-  const el=document.getElementById('saveLabel');if(el)el.textContent='Guardado '+lastSaved;
-  updateBadges();
-}
-function load(){
-  try{
-    const d=localStorage.getItem('axar_crm_v1');
-    if(d){
-      const p=JSON.parse(d);
-      VISITS=p.VISITS||[];OPPS=p.OPPS||[];ALERTAS=p.ALERTAS||[];
-      CLIENTES=p.CLIENTES||[];PARTES=p.PARTES||{};
-      if(p.ETAPAS)ETAPAS=p.ETAPAS;if(p.ECOLOR)ECOLOR=p.ECOLOR;if(p.EBG)EBG=p.EBG;
-      nextV=p.nextV||VISITS.length+1;nextO=p.nextO||OPPS.length+1;
-      nextA=p.nextA||ALERTAS.length+1;nextC=p.nextC||CLIENTES.length+1;
-    }else{loadDefaults();}
-  }catch(e){loadDefaults();}
-  updateBadges();render();
-}
+// save() defined in Supabase layer above
+// load() defined in Supabase layer above
 function loadDefaults(){
   VISITS=[
     {id:1,cliente:'TechCorp S.A.',contacto:'María López',telefono:'555-1234',tipo:'Nuevo',hora:'09:00',fecha:TODAY,estado:'Completada',notas:'Interesados en paquete premium. Enviar propuesta.',etapa:'Propuesta',valor:12000},
@@ -1577,6 +1850,7 @@ function openSyncModal() {
           <div class="imp-src" onclick="document.getElementById('syncOv').remove();syncDrive()">
             <div class="si">☁️</div><div class="sn">Google Drive</div><div class="ss">Guardar en tu Drive</div>
           </div>
+          <div class="imp-src" onclick="document.getElementById('syncOv').remove();openSupabaseConfig()"><div class="si">🗄️</div><div class="sn">Configurar Supabase</div><div class="ss">Sincronización en la nube</div></div>
           <div class="imp-src" onclick="document.getElementById('syncOv').remove();installApp()">
             <div class="si">📲</div><div class="sn">Instalar app</div><div class="ss">iOS · Android · PC · Mac</div>
           </div>
@@ -1795,6 +2069,7 @@ function openSyncModal() {
           <div class="imp-src" onclick="document.getElementById('syncOv').remove();syncDrive()">
             <div class="si">☁️</div><div class="sn">Google Drive</div><div class="ss">Guardar en tu Drive</div>
           </div>
+          <div class="imp-src" onclick="document.getElementById('syncOv').remove();openSupabaseConfig()"><div class="si">🗄️</div><div class="sn">Configurar Supabase</div><div class="ss">Sincronización en la nube</div></div>
           <div class="imp-src" onclick="document.getElementById('syncOv').remove();installApp()">
             <div class="si">📲</div><div class="sn">Instalar app</div><div class="ss">iOS · Android · PC · Mac</div>
           </div>
