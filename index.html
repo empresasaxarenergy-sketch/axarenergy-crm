@@ -463,7 +463,7 @@ body{display:flex}
 //  Reemplaza las credenciales con las tuyas de Supabase
 // ══════════════════════════════════════════════════════
 const SB_URL  = 'https://zpauephyavafumyalted.supabase.co';
-const SB_KEY  = 'sb_publishable_rrGmDre0_DRVPTaQoRQmWA_UwAr2QmG';
+const SB_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpwYXVlcGh5YXZhZnVteWFsdGVkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MDg3MTMsImV4cCI6MjA5NjA4NDcxM30.9OVLohzHV_yR33ldv_VF8KkQS5XJp5YyDfg252XX_Lc';
 const SB_READY = SB_URL !== 'https://zpauephyavafumyalted.supabase.co';
 
 let sbOnline = false;
@@ -471,11 +471,14 @@ let sbOnline = false;
 // ── Supabase REST helper ──
 async function sbFetch(method, table, body, params='') {
   const url = `${SB_URL}/rest/v1/${table}${params}`;
+  // Supabase API key authentication
+  const isLegacy = SB_KEY.startsWith('eyJ');
+  const authHeader = isLegacy ? `Bearer ${SB_KEY}` : `Bearer ${SB_KEY}`;
   const opts = {
     method,
     headers: {
       'apikey':        SB_KEY,
-      'Authorization': `Bearer ${SB_KEY}`,
+      'Authorization': authHeader,
       'Content-Type':  'application/json',
       'Prefer':        method === 'POST' ? 'resolution=merge-duplicates,return=minimal' : 'return=minimal'
     }
@@ -672,7 +675,7 @@ setInterval(checkRemoteChanges, 30000); // cada 30 segundos
 function openSupabaseConfig() {
   document.getElementById('sbConfigOv')?.remove();
   const currentUrl = SB_URL !== 'https://zpauephyavafumyalted.supabase.co' ? SB_URL : '';
-  const currentKey = SB_KEY !== 'sb_publishable_rrGmDre0_DRVPTaQoRQmWA_UwAr2QmG' ? SB_KEY : '';
+  const currentKey = SB_KEY !== 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpwYXVlcGh5YXZhZnVteWFsdGVkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MDg3MTMsImV4cCI6MjA5NjA4NDcxM30.9OVLohzHV_yR33ldv_VF8KkQS5XJp5YyDfg252XX_Lc' ? SB_KEY : '';
   const configured = SB_READY;
   document.body.insertAdjacentHTML('beforeend', `
     <div class="overlay" id="sbConfigOv" onclick="if(event.target.id==='sbConfigOv')this.remove()">
@@ -702,7 +705,7 @@ function openSupabaseConfig() {
             <input id="sb_key" value="${currentKey}" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."/>
           </div>
           <div style="background:var(--bg3);border-radius:var(--radius-sm);padding:10px 13px;font-size:12px;color:var(--text3);margin-top:4px;line-height:1.6">
-            💡 Las credenciales se guardan en este dispositivo. Para activarlas en todos los dispositivos, edita el archivo <b>index.html</b> en GitHub y cambia los valores de <b>https://zpauephyavafumyalted.supabase.co</b> y <b>sb_publishable_rrGmDre0_DRVPTaQoRQmWA_UwAr2QmG</b>.
+            💡 Las credenciales se guardan en este dispositivo. Para activarlas en todos los dispositivos, edita el archivo <b>index.html</b> en GitHub y cambia los valores de <b>https://zpauephyavafumyalted.supabase.co</b> y <b>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpwYXVlcGh5YXZhZnVteWFsdGVkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MDg3MTMsImV4cCI6MjA5NjA4NDcxM30.9OVLohzHV_yR33ldv_VF8KkQS5XJp5YyDfg252XX_Lc</b>.
           </div>
         </div>
         <div class="modal-footer">
@@ -1693,7 +1696,7 @@ try {
 
 // ── SERVICE WORKER (offline + install) ──
 if('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./sw.js', {scope:'./'})
+  navigator.serviceWorker.register('./sw.js?v=4', {scope:'./'})
     .then(r => console.log('SW registered:', r.scope))
     .catch(e => console.log('SW error:', e));
 }

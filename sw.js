@@ -1,4 +1,4 @@
-const CACHE = 'axar-crm-v2';
+const CACHE = 'axar-crm-v4';
 const FILES = ['./index.html','./manifest.json','./sw.js','./icon-192.svg','./icon-512.svg'];
 
 self.addEventListener('install', e => {
