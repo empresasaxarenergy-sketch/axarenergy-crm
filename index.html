@@ -464,7 +464,7 @@ body{display:flex}
 // ══════════════════════════════════════════════════════
 const SB_URL  = 'https://zpauephyavafumyalted.supabase.co';
 const SB_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpwYXVlcGh5YXZhZnVteWFsdGVkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MDg3MTMsImV4cCI6MjA5NjA4NDcxM30.9OVLohzHV_yR33ldv_VF8KkQS5XJp5YyDfg252XX_Lc';
-const SB_READY = SB_URL !== 'https://zpauephyavafumyalted.supabase.co';
+const SB_READY = SB_URL.includes('supabase.co') && SB_KEY.startsWith('eyJ');
 
 let sbOnline = false;
 
